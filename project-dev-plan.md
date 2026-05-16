@@ -31,7 +31,10 @@ The app is a kiosk-style touchscreen interface for a physical community-sharing 
 ## 3. Directory Structure
 
 ```
-CrazyKoala/
+crazy-koala-swift/
+├── AGENTS.md                        # Development protocol for AI agents
+├── project-dev-plan.md              # Project Development Plan
+├── windows-version/                 # Original Python app for reference
 ├── App/
 │   └── CrazyKoalaApp.swift          # @main entry point
 ├── Models/
@@ -61,6 +64,7 @@ CrazyKoala/
     │   └── Poppins/                 # TTF files reused from /windows-version/assets/fonts/
     ├── images/                      # PNG assets reused from /windows-version/assets/
     └── sounds/                      # Audio assets (M4A for recordings; convert default fallback from WAV) |
+
 ```
 
 ---
@@ -162,8 +166,8 @@ Documents/
 
 **Requirements:**
 - Configure `AVAudioSession` with `.playAndRecord` category.
-- **Recording:** Use `AVAudioRecorder` with settings: **AAC (`kAudioFormatMPEG4AAC`)**, 44.1 kHz, 1 channel, 64–96 kbps. Support a maximum duration (e.g., 60 seconds) and a timer callback for UI updates.
-- **Format note:** M4A (AAC) is used instead of WAV to reduce file size by roughly 10×. `AVAudioRecorder` encodes AAC in hardware natively.
+- **Recording:** Use `AVAudioRecorder` with settings: **AAC (`kAudioFormatMPEG4AAC`)**, 44.1 kHz, 1 channel, 64–96 kbps. Support a maximum duration of 30 seconds and a timer callback for UI updates.
+- **Format note:** M4A (AAC) is used instead of WAV to reduce file size. `AVAudioRecorder` encodes AAC in hardware natively.
 - **Playback:** Use `AVAudioPlayer` initialized with a file URL. Support stopping and restarting.
 - Store temporary recordings in the app's `tmp` directory.
 
@@ -197,7 +201,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 
 **Requirements:**
 - Display a simple layout with the koala logo/door image and welcome text.
-- A tap anywhere (or a simple button) advances to the mode-selection view.
+- A simple "Start" button advances to the mode-selection view.
 - Mode-selection view shows three simple buttons/tappable areas:
   1. **Deposit**
   2. **Take**
@@ -311,7 +315,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 **Reference:** `/windows-version/screens/components.py` (`YellowBar`, `YellowTitleBar`)
 
 **Requirements:**
-- A simple horizontal bar with a yellow background (`Color.yellow` or a custom yellow from asset catalog).
+- A simple horizontal bar with a yellow background (`Color.yellow`).
 - Contains a title label in Poppins font.
 - `YellowTitleBar` variant also includes a "Back" button on the left.
 - **Keep minimal.** No custom canvas drawing, no shadow effects. Use SwiftUI `Rectangle()` or `.background()` modifiers.
@@ -355,8 +359,8 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 | `simple_logo.png` | Branding |
 | `default_photo.png` | Fallback when user skips photo |
 | `default_audio.m4a` | Fallback when user skips audio (convert from original WAV during asset migration) |
-| `Microphone.png` | Recording status icon (optional, can use SF Symbols instead) |
-| `Trumpet.png` | Audio play button icon (optional, can use SF Symbols) |
+| `Microphone.png` | Recording status icon |
+| `Trumpet.png` | Audio play button icon |
 | `Poppins/` (all TTF files) | Required brand font |
 
 **Note:** `.wav` audio cues (`open_door.wav`, `meet_people.wav`, `goodbye.wav`, `start_interact.wav`) were used for serial-triggered audio in the original. They are **not required** for the initial iPad rewrite since serial is out of scope. If re-added later, consider converting them to M4A as well for consistency.
@@ -375,8 +379,6 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 
 ## 11. Implementation Order (Revised)
 
-> **Note on revisions:** This order was updated based on peer review. The core "data layer → services → views" philosophy is preserved, but shared primitives, permissions, and asset ingestion are now front-loaded to prevent refactoring work during view development.
-
 | Step | Task | Rationale |
 |------|------|-----------|
 | 1 | **Project setup:** Xcode project + GRDB (SPM) + `Info.plist` permissions (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`) + ingest all assets/fonts + register Poppins in `UIAppFonts` | Foundation and legal requirements for hardware access; fonts must be ready before any view renders. |
@@ -391,5 +393,3 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 | 10 | **End-to-end testing & iPad optimization:** Physical device testing, rotation handling, multitasking, memory profiling | Not just polish—validate the camera bridge, audio session interruptions, and gallery scrolling performance on real hardware. |
 
 ---
-
-*Plan generated on 2026-05-12. Revised based on peer review.*
