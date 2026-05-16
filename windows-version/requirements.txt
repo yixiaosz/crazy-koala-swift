@@ -1,0 +1,9 @@
+kivy==2.1.0
+kivy-examples==2.1.0
+opencv-python==4.8.0.74
+sounddevice==0.4.6
+pydub==0.25.1
+numpy==1.23.5
+playsound>=1.2.2
+pyserial==3.5
+
