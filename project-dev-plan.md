@@ -24,6 +24,7 @@ The app is a kiosk-style touchscreen interface for a physical community-sharing 
 | **Audio Playback** | `AVAudioPlayer` | Native, replaces `playsound` |
 | **Database** | GRDB (Swift wrapper over SQLite) | Preserves existing SQL schema and queries |
 | **File System** | `FileManager` | Sandboxed app container |
+| **Network** | `Network.framework` (`NWConnection`) | Persistent TCP client to ESP32-S3 |
 | **Fonts** | Poppins family (TTF) registered in `Info.plist` | Required brand font |
 
 ---
@@ -43,7 +44,8 @@ crazy-koala-swift/
 ├── Services/
 │   ├── DatabaseService.swift        # GRDB queue setup + connection (replaces db_setup.py)
 │   ├── CameraService.swift          # AVCaptureSession wrapper + photo capture
-│   └── AudioService.swift           # AVAudioRecorder + AVAudioPlayer wrapper
+│   ├── AudioService.swift           # AVAudioRecorder + AVAudioPlayer wrapper
+│   └── TCPClientService.swift       # NWConnection + ESP32 protocol (§5.4)
 ├── Views/
 │   ├── HomeView.swift               # Landing screen + mode selection
 │   ├── DepositFlow/
@@ -56,14 +58,15 @@ crazy-koala-swift/
 │   └── Memories/
 │       ├── GalleryView.swift        # Grid of completed memories
 │       └── DetailView.swift         # Side-by-side deposit/take detail
+│   ├── DebugView.swift              # ESP32 diagnostics sheet (§6.9)
 ├── Components/
 │   ├── YellowBar.swift              # Simple yellow header bar
 │   └── RoundedButton.swift          # Simple button with corner radius
 └── Assets/
     ├── fonts/
-    │   └── Poppins/                 # TTF files reused from /windows-version/assets/fonts/
-    ├── images/                      # PNG assets reused from /windows-version/assets/
-    └── sounds/                      # Audio assets (M4A for recordings; convert default fallback from WAV) |
+    │   └── Poppins/                 # TTF files from /assets/fonts/
+    ├── images/                      # PNG assets from /assets/
+    └── sounds/                      # Audio assets (all M4A/AAC)
 
 ```
 
@@ -173,6 +176,43 @@ Documents/
 
 ---
 
+### 5.4 TCPClientService
+
+**Responsibility:** Manage a persistent TCP connection to the ESP32-S3, send lock/unlock commands, receive status/heartbeat/events, and expose diagnostics.
+
+**Protocol Specification:**
+- **Framing:** Single ASCII byte per message (`'0'`–`'F'`). TCP is a stream; parse byte-by-byte.
+- **iPad → ESP32 Commands:**
+
+| Code | Action |
+|------|--------|
+| `'0'` | Heartbeat (auto-sent every 1 s if idle) |
+| `'1'` | Lock |
+| `'2'` | Unlock |
+| `'3'`–`'F'` | Reserved |
+
+- **ESP32 → iPad Status / Events:**
+
+| Code | Meaning |
+|------|---------|
+| `'0'` | Heartbeat |
+| `'1'` | State: Locked |
+| `'2'` | State: Unlocked |
+| `'3'` | Enter Home View (BOOT button pressed) |
+| `'4'`–`'F'` | Reserved |
+
+**Requirements:**
+- Hardcoded endpoint: `192.168.0.100:8080`.
+- Use `NWConnection` from `Network.framework`.
+- Maintain connection while app is foregrounded; reconnect with exponential backoff (max ~5 s) on drop.
+- Heartbeat: auto-send `'0'` every 1 s if no other command sent.
+- RX: read bytes into a buffer, validate ASCII `'0'`–`'F'`, discard invalid bytes.
+- Published diagnostics: `ConnectionState`, `lastRx`, `lastTx`, `fpsHistory` (5 s rolling), `errorLog` (last 20), `rawHexDump` (last 10 bytes), `localIPAddress`.
+- Methods: `start()`, `stop()`, `send(_:)`, `forceReconnect()`.
+- Thread-safe: use a dedicated `DispatchQueue` for all `NWConnection` I/O; publish to main queue.
+
+---
+
 ## 6. Views / Screens
 
 Implement the following 9 screens, matching the original screen flow in `/windows-version/main.py`:
@@ -201,12 +241,18 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 
 **Requirements:**
 - Display a simple layout with the koala logo/door image and welcome text.
-- A simple "Start" button advances to the mode-selection view.
+- A simple "Start" button (or tap anywhere) advances to the mode-selection view.
+  - **Receiving `'3'` from the ESP32 also advances from welcome to mode-selection.**
 - Mode-selection view shows three simple buttons/tappable areas:
   1. **Deposit**
   2. **Take**
   3. **Happy Memories**
 - Tapping an option sets a shared navigation/app state (`mode`) and pushes the first screen of that flow.
+- **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner. Tapping it presents `DebugView` as a sheet.
+- **Audio cues (mapped from `/windows-version/main.py`):**
+  - Play `start_interact.m4a` when transitioning from the welcome screen to the mode-selection view.
+  - Play `meet_people.m4a` when the user taps **Deposit** or **Take**.
+  - Play `goodbye.m4a` when a flow completes and the app returns to `HomeView`.
 - **Keep it minimal.** No complex custom layouts. A `VStack` or `HStack` of buttons is sufficient.
 
 ### 6.2 DepositFlow / InputNameView
@@ -256,10 +302,13 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - The text and title adapt based on `mode`:
   - **Deposit:** "Open the door to store the item."
   - **Take:** "Open the door to retrieve the item."
-- A "Next" button.
+- **"Open Door" button:** Sends `'2'` (unlock) to the ESP32 via `TCPClientService`.
+  - **Audio cue:** Play `open_door.m4a` concurrently with sending the TCP `'2'` unlock command (ported from `open_door.wav` in `/windows-version/main.py`).
+- The user places/retrieves the item.
+- **"Done" button:** Sends `'1'` (lock) to the ESP32, then:
   - If `mode == deposit`, return to the root/Home view.
   - If `mode == take`, navigate to `PhotoAudioView` (so the user can record retrieval photo/audio).
-- **Serial communication is out of scope for now.** Do not implement COM port logic. If needed later, it will be added as a separate service.
+- The ESP32 handles the door timer internally; no iPad-side timer required.
 
 ### 6.5 TakeFlow / SelectItemView
 
@@ -308,6 +357,25 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 
 ---
 
+### 6.9 DebugView
+
+**Reference:** PoC `DebugView.swift`
+
+**Requirements:**
+- Accessible via the `ant.fill` debug button on `HomeView` (presented as a sheet so it does not pollute the `NavigationStack` path).
+- Displays the following diagnostics:
+  - **Connection State Machine:** Colored indicator + text (`Disconnected`, `Connecting`, `Connected`, `Reconnecting`, etc.).
+  - **Last RX / TX:** Character, hex value (`0x30`–`0x46`), and timestamp (`HH:mm:ss.SSS`).
+  - **Frame Counter & FPS:** Bar chart showing valid frames received per second over the last 5 seconds.
+  - **Raw Packet Hex Dump:** Last 10 bytes received in hex format.
+  - **Network Vitals:** Local IP address, target IP (`192.168.0.100`), target port (`8080`).
+  - **Force Reconnect:** Button to close the socket and immediately reconnect.
+  - **Error Log:** Append-only list of the last 20 errors (TCP drops, parse errors, timeouts).
+  - **Manual Command Injector:** Grid of 16 buttons (`0`–`F`). Tapping sends that character immediately.
+- Use standard SwiftUI components (`ScrollView`, `LazyVGrid`, `Grid`). No custom canvas drawing.
+
+---
+
 ## 7. Shared Components
 
 ### 7.1 YellowBar
@@ -339,6 +407,7 @@ The original Kivy `ScreenManager` maintains shared state. Replace this with a si
 AppState (shared)
 ├── currentItem: Item?           # Currently selected item for Take/Memories flows
 ├── mode: Mode?                  # .deposit or .take
+├── tcpClient: TCPClientService  # Shared ESP32 TCP connection (§5.4)
 └── navigationPath: NavigationPath
 ```
 
@@ -350,7 +419,7 @@ AppState (shared)
 
 ## 9. Assets to Migrate
 
-Copy the following assets from `/windows-version/assets/` into the new Xcode asset catalog or resource bundle:
+Ingest the following assets from the repo root `/assets/` folder into the Xcode asset catalog or resource bundle:
 
 | Asset | Usage |
 |-------|-------|
@@ -358,12 +427,21 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 | `door_open.png`, `door_close.png` | OpenDoorView visuals |
 | `simple_logo.png` | Branding |
 | `default_photo.png` | Fallback when user skips photo |
-| `default_audio.m4a` | Fallback when user skips audio (convert from original WAV during asset migration) |
+| `default_audio.m4a` | Fallback when user skips audio recording (ported from `default_audio.wav` in `/windows-version/screens/deposit/photo_audio_record.py`) |
+| `open_door.m4a` | Played when the "Open Door" button is tapped in `OpenDoorView` (ported from `open_door.wav` in `/windows-version/main.py`) |
+| `goodbye.m4a` | Played when returning to `HomeView` at the end of a session (ported from `goodbye.wav` in `/windows-version/main.py`) |
+| `start_interact.m4a` | Played when advancing from welcome to mode-selection in `HomeView` (ported from `start_interact.wav` in `/windows-version/main.py`) |
+| `meet_people.m4a` | Played when the user begins a Deposit or Take flow (ported from `meet_people.wav` in `/windows-version/main.py`) |
 | `Microphone.png` | Recording status icon |
 | `Trumpet.png` | Audio play button icon |
 | `Poppins/` (all TTF files) | Required brand font |
 
-**Note:** `.wav` audio cues (`open_door.wav`, `meet_people.wav`, `goodbye.wav`, `start_interact.wav`) were used for serial-triggered audio in the original. They are **not required** for the initial iPad rewrite since serial is out of scope. If re-added later, consider converting them to M4A as well for consistency.
+**Audio cue mapping (ported from `/windows-version/main.py`):**
+In the original Python app, these sounds were triggered by external hardware events. In the iPad rewrite they are played locally by `AudioService` at the equivalent lifecycle moments:
+- `start_interact.m4a` (original `start_interact.wav`) → Play when the user first engages (welcome → mode-selection transition).
+- `meet_people.m4a` (original `meet_people.wav`) → Play when the user selects Deposit or Take.
+- `open_door.m4a` (original `open_door.wav`) → Play on the "Open Door" button tap in `OpenDoorView` (before or concurrently with the TCP `'2'` unlock command).
+- `goodbye.m4a` (original `goodbye.wav`) → Play when the flow completes and the app navigates back to `HomeView`.
 
 ---
 
@@ -371,9 +449,10 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 
 1. **iPad-only.** Target iPadOS 17+.
 2. **Orientation:** Support both landscape and portrait (the original app is landscape-oriented; ensure layouts adapt).
-3. **Permissions:** Add `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` to `Info.plist`.
-4. **Font registration:** Add all Poppins TTF files to the app target and list them under `UIAppFonts` in `Info.plist`.
-5. **Error handling:** Log errors to console (matching original `print` debugging style). Do not build elaborate error UI beyond simple alerts.
+3. **Permissions:** Add `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, and **`NSLocalNetworkUsageDescription`** to `Info.plist`.
+4. **Network Capability:** Ensure `Network.framework` is linked and the app has the local-network entitlement.
+5. **Font registration:** Add all Poppins TTF files to the app target and list them under `UIAppFonts` in `Info.plist`.
+6. **Error handling:** Log errors to console (matching original `print` debugging style). Do not build elaborate error UI beyond simple alerts.
 
 ---
 
@@ -381,15 +460,75 @@ Copy the following assets from `/windows-version/assets/` into the new Xcode ass
 
 | Step | Task | Rationale |
 |------|------|-----------|
-| 1 | **Project setup:** Xcode project + GRDB (SPM) + `Info.plist` permissions (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`) + ingest all assets/fonts + register Poppins in `UIAppFonts` | Foundation and legal requirements for hardware access; fonts must be ready before any view renders. |
+| 1 | **Project setup:** Xcode project + GRDB (SPM) + `Info.plist` permissions (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, **`NSLocalNetworkUsageDescription`**) + ingest all assets/fonts + register Poppins in `UIAppFonts` + **link `Network.framework`** | Foundation and legal requirements for hardware and local network access; fonts must be ready before any view renders. |
 | 2 | **Shared components:** `YellowBar`, `YellowTitleBar`, `RoundedButton`, Poppins `Font` extensions | These are primitives used by virtually every screen, not "polish." Building views without them forces refactoring later. |
-| 3 | **Persistence layer:** `DatabaseService` + `Item` model + `ItemStore` CRUD + file I/O (`saveFile`, fallback copy logic) + unit tests | Core logic verified in isolation. Define an error-handling contract here (`Result` or `throws`) so `CameraService` and `AudioService` follow the same pattern. |
-| 4 | **Audio service:** `AVAudioRecorder` + `AVAudioPlayer` wrapper (M4A/AAC) | Self-contained and easier than camera; builds confidence before tackling the UIKit bridge. |
-| 5 | **Camera service:** `AVCaptureSession` + `AVCapturePhotoOutput` + **`UIViewRepresentable` preview bridge** | Hardest service. The `UIViewRepresentable` wrapper for `AVCaptureVideoPreviewLayer` is non-trivial and must be treated as a first-class engineering task, not an afterthought. Debug with a simple scratch view before integrating into the deposit flow. |
-| 6 | **Navigation + Home:** `NavigationStack`, `AppState`, `HomeView`, `InputNameView` | Establish routing and the root view before building deeper flows. |
-| 7 | **Deposit flow:** `PhotoAudioView` → `OpenDoorView` | First real integration of camera + audio services. |
-| 8 | **Take flow:** `SelectItemView` → `ViewDepositView` | Depends on database + file validation already proven in step 3. |
-| 9 | **Memories flow:** `GalleryView` → `DetailView` | Read-only flow; safe to build last. |
-| 10 | **End-to-end testing & iPad optimization:** Physical device testing, rotation handling, multitasking, memory profiling | Not just polish—validate the camera bridge, audio session interruptions, and gallery scrolling performance on real hardware. |
+| 3 | **Persistence layer:** `DatabaseService` + `Item` model + `ItemStore` CRUD + file I/O (`saveFile`, fallback copy logic) + unit tests | Core logic verified in isolation. Define an error-handling contract here (`Result` or `throws`) so `CameraService`, `AudioService`, and `TCPClientService` follow the same pattern. |
+| 4 | **Audio service:** `AVAudioRecorder` + `AVAudioPlayer` wrapper (M4A/AAC) | Self-contained and easier than camera; builds confidence before tackling harder services. |
+| 5 | **TCP client service:** `Network.framework` `NWConnection` wrapper (`TCPClientService`), heartbeat, auto-reconnect, protocol models (`PayloadRecord`, `LogEntry`, `ConnectionState`), debug view layout | Must exist before `HomeView` (Step 7) so the `'3'` command handler and `ant.fill` debug button have a service to bind to. |
+| 6 | **Camera service:** `AVCaptureSession` + `AVCapturePhotoOutput` + **`UIViewRepresentable` preview bridge** | Hardest service. The `UIViewRepresentable` wrapper for `AVCaptureVideoPreviewLayer` is non-trivial and must be treated as a first-class engineering task, not an afterthought. Debug with a simple scratch view before integrating into the deposit flow. |
+| 7 | **Navigation + Home:** `NavigationStack`, `AppState`, `HomeView` (with `ant.fill` debug sheet button + `'3'` ESP32 command handler), `InputNameView` | Establish routing and the root view before building deeper flows. |
+| 8 | **Deposit flow:** `PhotoAudioView` → `OpenDoorView` (now functional: sends `'2'` unlock / `'1'` lock via `TCPClientService`) | First real integration of camera + audio + TCP services. |
+| 9 | **Take flow:** `SelectItemView` → `ViewDepositView` | Depends on database + file validation already proven in step 3. |
+| 10 | **Memories flow:** `GalleryView` → `DetailView` | Read-only flow; safe to build last. |
+| 11 | **End-to-end testing & iPad optimization:** Physical device testing, rotation handling, TCP reconnection stress test, ESP32 fail-safe validation, memory profiling | Validate the camera bridge, audio session interruptions, TCP reconnect behavior, and gallery scrolling performance on real hardware. |
+
+---
+
+## 12. ESP32-S3 Firmware Specification
+
+**Target:** ESP32-S3-N16R8 (Arduino IDE board target: `ESP32S3 Dev Module`)
+
+### 12.1 Network Configuration (Hardcoded)
+
+| Parameter | Value |
+|-----------|-------|
+| SSID | `Optus_A0516A` |
+| Password | `lakes95962ca` |
+| Static IP | `192.168.0.100` |
+| Gateway | `192.168.0.1` |
+| Subnet | `255.255.255.0` |
+| DNS | `192.168.0.1` |
+| TCP Listen Port | `8080` |
+
+### 12.2 Protocol (Rearranged)
+
+**iPad → ESP32 Commands:**
+
+| Code | Action |
+|------|--------|
+| `'0'` | Heartbeat |
+| `'1'` | Lock |
+| `'2'` | Unlock |
+| `'3'`–`'F'` | Reserved |
+
+**ESP32 → iPad Status / Events:**
+
+| Code | Meaning |
+|------|---------|
+| `'0'` | Heartbeat |
+| `'1'` | State: Locked |
+| `'2'` | State: Unlocked |
+| `'3'` | Enter Home View (BOOT button pressed) |
+| `'4'`–`'F'` | Reserved |
+
+### 12.3 Core Loop Behavior
+
+- **Heartbeat:** If no transmission in the last **1 s**, send `'0'` to iPad.
+- **Fail-safe:** If no valid command for **300 s**, set state to `LOCKED` and send `'1'` to iPad.
+- **BOOT button (GPIO0):** Debounced press sends `'3'` to iPad.
+- **RGB LED (GPIO48):** Action indicator using Adafruit NeoPixel.
+  - Receives `'1'` (lock) → **red** for 1 s.
+  - Receives `'2'` (unlock) → **green** for 1 s.
+  - Receives `'0'` → no LED change.
+  - Receives any other valid command → **blue** for 1 s.
+  - All LED durations are non-blocking (`millis()`-based).
+
+### 12.4 Requirements
+
+- Fully non-blocking main loop (no `delay()`).
+- Use `WiFiServer` / `WiFiClient` from ESP32 Arduino core.
+- `tcpServer.setNoDelay(true)` for low-latency single-byte frames.
+- Maintain exactly one TCP client connection.
+- Parse TCP stream byte-by-byte; validate ASCII `'0'`–`'F'`.
 
 ---
