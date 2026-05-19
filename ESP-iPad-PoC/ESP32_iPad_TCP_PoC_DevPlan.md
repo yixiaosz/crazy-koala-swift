@@ -13,13 +13,13 @@
 
 | Parameter | Value (Placeholder) |
 |-----------|---------------------|
-| SSID | `MyLabNetwork` |
-| Password | `LabPassword123` |
-| ESP32 Static IP | `192.168.1.100` |
-| ESP32 Gateway | `192.168.1.1` |
+| SSID | `Optus_A0516A` |
+| Password | `lakes95962ca` |
+| ESP32 Static IP | `192.168.0.100` |
+| ESP32 Gateway | `192.168.0.1` |
 | ESP32 Subnet | `255.255.255.0` |
 | TCP Listen Port | `8080` |
-| iPad IP | Assigned via DHCP (typically `192.168.1.x`) |
+| iPad IP | Assigned via DHCP (typically `192.168.0.x`) |
 
 > **Note:** The ESP32 must use a static IP. Do not rely on DHCP for the server endpoint.
 
