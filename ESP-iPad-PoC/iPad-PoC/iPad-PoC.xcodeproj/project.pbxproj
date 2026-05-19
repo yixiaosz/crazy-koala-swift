@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		9A08029A2FBC2D6A00CDB66C /* ESP32-PoCApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0802952FBC2D6A00CDB66C /* ESP32-PoCApp.swift */; };
+		9A08029A2FBC2D6A00CDB66C /* iPad-PoCApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0802952FBC2D6A00CDB66C /* iPad-PoCApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		9A0802572FBC2AA000CDB66C /* ESP32-PoC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "ESP32-PoC.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		9A0802952FBC2D6A00CDB66C /* ESP32-PoCApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ESP32-PoCApp.swift"; sourceTree = "<group>"; };
+		9A0802952FBC2D6A00CDB66C /* iPad-PoCApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iPad-PoCApp.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -75,7 +75,7 @@
 				9A08029F2FBC2DBE00CDB66C /* Model */,
 				9A0802A22FBC2DBE00CDB66C /* View */,
 				9A0802A42FBC2DBE00CDB66C /* ViewModel */,
-				9A0802952FBC2D6A00CDB66C /* ESP32-PoCApp.swift */,
+				9A0802952FBC2D6A00CDB66C /* iPad-PoCApp.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -127,7 +127,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 9A0802522FBC2AA000CDB66C /* Build configuration list for PBXProject "ESP32-PoC" */;
+			buildConfigurationList = 9A0802522FBC2AA000CDB66C /* Build configuration list for PBXProject "iPad-PoC" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -161,7 +161,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9A08029A2FBC2D6A00CDB66C /* ESP32-PoCApp.swift in Sources */,
+				9A08029A2FBC2D6A00CDB66C /* iPad-PoCApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -360,7 +360,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		9A0802522FBC2AA000CDB66C /* Build configuration list for PBXProject "ESP32-PoC" */ = {
+		9A0802522FBC2AA000CDB66C /* Build configuration list for PBXProject "iPad-PoC" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				9A0802602FBC2AA100CDB66C /* Debug */,
