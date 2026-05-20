@@ -336,9 +336,9 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   3. **Happy Memories**
   - Tapping an option sets a shared navigation/app state (`mode`) and pushes the first screen of that flow.
   - **End Session button:** A clearly visible button (e.g., red-outlined pill) on the mode-selection view. Tapping it:
-    1. Calls `SessionLogService.endSession()`.
-    2. Sends lock with ACK verification via `TCPClientService.sendLockAndVerify(timeout: 2, retries: 1)` (§5.4). If the ACK is not received after the retry, display a warning alert (e.g., "Door lock could not be confirmed. Please verify manually.") but still proceed to step 3.
-    3. Plays `goodbye.m4a`.
+    1. Sends lock with ACK verification via `TCPClientService.sendLockAndVerify(timeout: 2, retries: 1)` (§5.4). If the ACK is not received after the retry, display a warning alert (e.g., "Door lock could not be confirmed. Please verify manually.") but still proceed to step 2.
+    2. Plays `goodbye.m4a`.
+    3. Calls `AppState.endSession()`, which internally calls `SessionLogService.endSession()` to write `SESSION_END` with `duration_ms` and clears all session state. **Important:** Do not call `SessionLogService.log(.sessionEnd)` separately — `endSession()` handles the final log entry with duration calculation. Duplicate calls produce a `SESSION_END` line without `duration_ms`, breaking the session duration parser.
     4. Returns to the welcome screen.
 - **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner **of the welcome screen only**. Tapping it presents `DebugView` as a sheet. This ensures developers can access diagnostics and session logs **without starting a session**.
 - **Audio cues (mapped from `/windows-version/main.py`):**

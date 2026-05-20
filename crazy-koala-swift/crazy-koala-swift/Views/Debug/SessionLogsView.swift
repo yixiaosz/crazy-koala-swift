@@ -120,11 +120,13 @@ struct SessionLogsView: View {
     }
 
     private func parseDuration(from content: String) -> String? {
-        // Look for duration_ms in SESSION_END line
-        guard let range = content.range(of: "duration_ms=") else { return nil }
-        let after = content[range.upperBound...]
+        // Find the SESSION_END line and extract duration_ms from it
+        let lines = content.components(separatedBy: "\n")
+        guard let endLine = lines.last(where: { $0.contains("[SESSION_END]") }) else { return nil }
+        guard let range = endLine.range(of: "duration_ms=") else { return nil }
+        let after = endLine[range.upperBound...]
         let msString = after.prefix(while: { $0.isNumber })
-        guard let ms = Int(msString) else { return nil }
+        guard let ms = Int(msString), ms > 0 else { return nil }
         let seconds = ms / 1000
         let minutes = seconds / 60
         let secs = seconds % 60

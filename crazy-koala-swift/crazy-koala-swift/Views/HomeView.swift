@@ -177,8 +177,6 @@ struct HomeView: View {
     // MARK: - End Session (§6.1)
 
     private func endSession() {
-        appState.sessionLog.log(.sessionEnd)
-
         // Send lock with ACK verification (§5.4)
         appState.tcpClient.sendLockAndVerify(timeout: 2, retries: 1) { success in
             DispatchQueue.main.async {
