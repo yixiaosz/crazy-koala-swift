@@ -45,9 +45,10 @@ crazy-koala-swift/
 │   ├── DatabaseService.swift        # GRDB queue setup + connection (replaces db_setup.py)
 │   ├── CameraService.swift          # AVCaptureSession wrapper + photo capture
 │   ├── AudioService.swift           # AVAudioRecorder + AVAudioPlayer wrapper
-│   └── TCPClientService.swift       # NWConnection + ESP32 protocol (§5.4)
+│   ├── TCPClientService.swift       # NWConnection + ESP32 protocol (§5.4)
+│   └── SessionLogService.swift      # Per-session timestamped action logging (§5.5)
 ├── Views/
-│   ├── HomeView.swift               # Landing screen + mode selection
+│   ├── HomeView.swift               # Landing screen + mode selection + End Session (§6.1)
 │   ├── DepositFlow/
 │   │   ├── InputNameView.swift      # Text input for item name
 │   │   ├── PhotoAudioView.swift     # Camera preview + audio recording
@@ -55,10 +56,13 @@ crazy-koala-swift/
 │   ├── TakeFlow/
 │   │   ├── SelectItemView.swift     # Grid of unretrieved items
 │   │   └── ViewDepositView.swift    # Deposit detail before retrieval
-│   └── Memories/
-│       ├── GalleryView.swift        # Grid of completed memories
-│       └── DetailView.swift         # Side-by-side deposit/take detail
-│   ├── DebugView.swift              # ESP32 diagnostics sheet (§6.9)
+│   ├── Memories/
+│   │   ├── GalleryView.swift        # Grid of completed memories
+│   │   └── DetailView.swift         # Side-by-side deposit/take detail
+│   └── Debug/
+│       ├── DebugView.swift          # ESP32 diagnostics + Session Logs entrance (§6.9)
+│       ├── SessionLogsView.swift    # List of all session log files (§6.10)
+│       └── SessionLogDetailView.swift # Full log content viewer (§6.10)
 ├── Components/
 │   ├── YellowBar.swift              # Simple yellow header bar
 │   └── RoundedButton.swift          # Simple button with corner radius
@@ -213,9 +217,69 @@ Documents/
 
 ---
 
+### 5.5 SessionLogService
+
+**Responsibility:** Create one timestamped plain-text log file per user session, immediately append every user action to disk, and recover gracefully if the app is killed mid-session.
+
+**Session Definition:**
+- **Start:** User enters the mode-selection view (via welcome-screen tap or ESP32 `'3'`).
+- **End:** User taps the **"End Session"** button.
+- **Rule:** If a session is already active, ESP32 `'3'` is ignored.
+
+**Log File Format:**
+- **Location:** `Documents/logs/session_YYYY-MM-DD_HH-mm-ss_SSS.txt`
+- **Encoding:** UTF-8, one line per entry.
+- **Timestamp:** Millisecond precision — `yyyy-MM-dd HH:mm:ss.SSS`.
+- **Line format:** `[timestamp] [ACTION] key=value key=value ...`
+
+**Logged Actions (Exhaustive):**
+
+| Action | Trigger | Details |
+|--------|---------|---------|
+| `SESSION_START` | Enter mode selection | `trigger`: `tap_start` / `esp32_button` |
+| `SELECT_MODE` | Tap Deposit / Take / Memories | `mode`: `deposit` / `take` / `memories` |
+| `VIEW_APPEAR` | `onAppear` of any flow view | `view`: `InputNameView`, `PhotoAudioView`, etc. |
+| `INPUT_NAME` | Tap Next after typing | `name`: user input value |
+| `CAPTURE_PHOTO` | Photo captured | `path`: file path |
+| `RECORD_AUDIO_START` | Tap record | — |
+| `RECORD_AUDIO_STOP` | Tap stop / auto-stop at 60 s | `duration_ms` |
+| `PLAY_AUDIO` | Tap play button | `file`: filename |
+| `TAP_NEXT` | Tap Next | `from`: current view |
+| `TAP_BACK` | Tap Back | `from`: current view |
+| `TAP_DONE` | Tap Done in `OpenDoorView` | `from`: `OpenDoorView`, `mode` |
+| `DOOR_UNLOCK` | Tap "Open Door" / send TCP `'2'` | — |
+| `DOOR_LOCK` | Tap "Done" after placing item / send TCP `'1'` | — |
+| `SELECT_ITEM` | Tap item in grid | `name`: item name |
+| `ESP32_TX` | Send any TCP command | `code`, `meaning` |
+| `ESP32_RX` | Receive any TCP event | `code`, `meaning` |
+| `ERROR` | Any thrown error / alert shown | `message` |
+| `SESSION_END` | Tap "End Session" | `duration_ms` |
+| `SESSION_ABORTED` | App killed/crashed before `SESSION_END` | `reason`: `app_killed_or_crash` |
+
+**Crash / Kill Resilience:**
+1. Every `log()` call appends to the file **immediately** via `FileHandle` on a background queue. No in-memory buffering.
+2. On `startSession()`, store the active log file URL in `UserDefaults` under key `activeSessionLogURL`.
+3. On app launch, `SessionLogService` checks `UserDefaults`:
+   - If a URL exists and the file does not end with `SESSION_END`, append `SESSION_ABORTED` with the current timestamp.
+   - Clear the `UserDefaults` key.
+4. On normal `endSession()`, write `SESSION_END`, then clear the `UserDefaults` key.
+
+**Interface:**
+```swift
+class SessionLogService {
+    func startSession(trigger: SessionTrigger)
+    func log(_ action: LogAction, details: [String: String]? = nil)
+    func endSession()
+    var isSessionActive: Bool { get }
+    var currentLogURL: URL? { get }
+}
+```
+
+---
+
 ## 6. Views / Screens
 
-Implement the following 9 screens, matching the original screen flow in `/windows-version/main.py`:
+Implement the following screens, matching the original screen flow in `/windows-version/main.py`, plus developer-only debug screens:
 
 ```
 Home
@@ -239,20 +303,29 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 
 **Reference:** `/windows-version/screens/home_page.py` (`HomePage` + `ChooseInteractType`)
 
+**Two States:**
+1. **Welcome screen** — shown at app launch and after a session ends.
+2. **Mode-selection view** — shown during an active session.
+
 **Requirements:**
-- Display a simple layout with the koala logo/door image and welcome text.
-- A simple "Start" button (or tap anywhere) advances to the mode-selection view.
-  - **Receiving `'3'` from the ESP32 also advances from welcome to mode-selection.**
-- Mode-selection view shows three simple buttons/tappable areas:
+- **Welcome screen:** Display a simple layout with the koala logo/door image and welcome text. A **"Start" button** (and only the Start button) advances to the mode-selection view.
+  - **Receiving `'3'` from the ESP32 also advances from welcome to mode-selection, but only if no session is currently active.**
+  - On transition to mode-selection, call `SessionLogService.startSession(trigger:)`.
+- **Mode-selection view:** Shows three simple buttons/tappable areas:
   1. **Deposit**
   2. **Take**
   3. **Happy Memories**
-- Tapping an option sets a shared navigation/app state (`mode`) and pushes the first screen of that flow.
-- **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner. Tapping it presents `DebugView` as a sheet.
+  - Tapping an option sets a shared navigation/app state (`mode`) and pushes the first screen of that flow.
+  - **End Session button:** A clearly visible button (e.g., red-outlined pill) on the mode-selection view. Tapping it:
+    1. Calls `SessionLogService.endSession()`.
+    2. Sends TCP `'1'` (lock) to the ESP32 via `TCPClientService` as a safety fail-safe.
+    3. Plays `goodbye.m4a`.
+    4. Returns to the welcome screen.
+- **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner **of the welcome screen only**. Tapping it presents `DebugView` as a sheet. This ensures developers can access diagnostics and session logs **without starting a session**.
 - **Audio cues (mapped from `/windows-version/main.py`):**
   - Play `start_interact.m4a` when transitioning from the welcome screen to the mode-selection view.
   - Play `meet_people.m4a` when the user taps **Deposit** or **Take**.
-  - Play `goodbye.m4a` when a flow completes and the app returns to `HomeView`.
+  - Play `goodbye.m4a` **only when the user taps End Session** (not on flow completion).
 - **Keep it minimal.** No complex custom layouts. A `VStack` or `HStack` of buttons is sufficient.
 
 ### 6.2 DepositFlow / InputNameView
@@ -268,7 +341,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - If invalid, show a simple alert (`alert` modifier in SwiftUI).
 - On success, pass the name to `PhotoAudioView` and set `mode = deposit`.
 
-### 6.3 DepositFlow / PhotoAudioView
+### 6.3 Shared / PhotoAudioView
 
 **Reference:** `/windows-version/screens/deposit/photo_audio_record.py`
 
@@ -281,13 +354,19 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - Label showing recording duration (e.g., "Recording... 5s").
   - Maximum duration: 60 seconds.
 - **Bottom:** "Next" button.
-- On "Next":
+- **Deposit mode** (`mode == deposit`) — On "Next":
   1. Create `data/{item_name}/` folder.
   2. Move the captured photo (or copy `default_photo.png` if none captured) to `data/{item_name}/{item_name}_deposit_photo.jpg`.
   3. Move the recorded audio (or copy `default_audio.m4a` if none recorded) to `data/{item_name}/{item_name}_deposit_audio.m4a`.
   4. Call `insertDeposit` in GRDB with the final paths.
   5. Clear temporary files.
   6. Navigate to `OpenDoorView` with `mode = deposit`.
+- **Take mode** (`mode == take`) — On "Next":
+  1. Move the captured photo (or copy `default_photo.png`) to `data/{item_name}/{item_name}_taken_photo.jpg`.
+  2. Move the recorded audio (or copy `default_audio.m4a`) to `data/{item_name}/{item_name}_taken_audio.m4a`.
+  3. Call `updateTaken` in GRDB with the final paths.
+  4. Clear temporary files.
+  5. Return to `HomeView` **mode-selection view** (session stays active).
 
 **Default fallback behavior (port from `/windows-version/screens/deposit/photo_audio_record.py`):**
 - If the user proceeds without taking a photo, copy the bundled `default_photo.png` into the item folder.
@@ -306,7 +385,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - **Audio cue:** Play `open_door.m4a` concurrently with sending the TCP `'2'` unlock command (ported from `open_door.wav` in `/windows-version/main.py`).
 - The user places/retrieves the item.
 - **"Done" button:** Sends `'1'` (lock) to the ESP32, then:
-  - If `mode == deposit`, return to the root/Home view.
+  - If `mode == deposit`, return to the `HomeView` **mode-selection view** (session stays active).
   - If `mode == take`, navigate to `PhotoAudioView` (so the user can record retrieval photo/audio).
 - The ESP32 handles the door timer internally; no iPad-side timer required.
 
@@ -372,7 +451,25 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - **Force Reconnect:** Button to close the socket and immediately reconnect.
   - **Error Log:** Append-only list of the last 20 errors (TCP drops, parse errors, timeouts).
   - **Manual Command Injector:** Grid of 16 buttons (`0`–`F`). Tapping sends that character immediately.
+  - **Session Logs:** Button that pushes/presents `SessionLogsView` (§6.10).
 - Use standard SwiftUI components (`ScrollView`, `LazyVGrid`, `Grid`). No custom canvas drawing.
+
+### 6.10 Debug / SessionLogsView & SessionLogDetailView
+
+**Responsibility:** Allow developers to inspect, share, and delete per-session log files without exposing them to end users.
+
+**SessionLogsView Requirements:**
+- List all `.txt` files in `Documents/logs/`, sorted newest → oldest.
+- Each row shows: filename, file size, line count (entry count), and parsed session duration (if start/end timestamps are present).
+- **Tap row:** Push to `SessionLogDetailView` showing the full log text in a scrollable `Text` view (monospaced).
+- **Share (single):** Each row has a share button → `UIActivityViewController` via `UIViewControllerRepresentable`. Uses iPadOS native share sheet.
+- **Multi-select:** Edit mode → select multiple files → toolbar Share button → `UIActivityViewController` with multiple file URLs.
+- **Delete:** Swipe-to-delete individual files, or multi-select bulk delete.
+- **No auto-deletion:** Logs are kept indefinitely until manually deleted.
+
+**SessionLogDetailView Requirements:**
+- Scrollable monospaced text view displaying the full log content.
+- Share button in navigation bar to export the single file.
 
 ---
 
@@ -408,12 +505,15 @@ AppState (shared)
 ├── currentItem: Item?           # Currently selected item for Take/Memories flows
 ├── mode: Mode?                  # .deposit or .take
 ├── tcpClient: TCPClientService  # Shared ESP32 TCP connection (§5.4)
+├── sessionLog: SessionLogService # Shared session logger (§5.5)
+├── isSessionActive: Bool        # true when in mode-selection view or any flow
 └── navigationPath: NavigationPath
 ```
 
 **Screen flow logic (port from `/windows-version/main.py`):**
 - `MyScreenManager.switch_to(screenName, mode)` → push corresponding view + set `appState.mode`.
 - `current_item` dictionary → strongly typed `AppState.currentItem`.
+- **Session lifecycle:** `isSessionActive` is set to `true` on welcome→mode-selection transition, and `false` on End Session. If `isSessionActive == true`, ESP32 `'3'` is ignored.
 
 ---
 
@@ -429,7 +529,7 @@ Ingest the following assets from the repo root `/assets/` folder into the Xcode 
 | `default_photo.png` | Fallback when user skips photo |
 | `default_audio.m4a` | Fallback when user skips audio recording (ported from `default_audio.wav` in `/windows-version/screens/deposit/photo_audio_record.py`) |
 | `open_door.m4a` | Played when the "Open Door" button is tapped in `OpenDoorView` (ported from `open_door.wav` in `/windows-version/main.py`) |
-| `goodbye.m4a` | Played when returning to `HomeView` at the end of a session (ported from `goodbye.wav` in `/windows-version/main.py`) |
+| `goodbye.m4a` | Played **only when the user taps "End Session"** (ported from `goodbye.wav` in `/windows-version/main.py`) |
 | `start_interact.m4a` | Played when advancing from welcome to mode-selection in `HomeView` (ported from `start_interact.wav` in `/windows-version/main.py`) |
 | `meet_people.m4a` | Played when the user begins a Deposit or Take flow (ported from `meet_people.wav` in `/windows-version/main.py`) |
 | `Microphone.png` | Recording status icon |
@@ -453,6 +553,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 4. **Network Capability:** Ensure `Network.framework` is linked and the app has the local-network entitlement.
 5. **Font registration:** Add all Poppins TTF files to the app target and list them under `UIAppFonts` in `Info.plist`.
 6. **Error handling:** Log errors to console (matching original `print` debugging style). Do not build elaborate error UI beyond simple alerts.
+7. **Log storage:** Session logs are stored in `Documents/logs/` inside the app sandbox. They are never automatically deleted. Developers access them via the hidden `SessionLogsView` inside `DebugView`.
 
 ---
 
@@ -462,11 +563,11 @@ In the original Python app, these sounds were triggered by external hardware eve
 |------|------|-----------|
 | 1 | **Project setup:** Xcode project + GRDB (SPM) + `Info.plist` permissions (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, **`NSLocalNetworkUsageDescription`**) + ingest all assets/fonts + register Poppins in `UIAppFonts` + **link `Network.framework`** | Foundation and legal requirements for hardware and local network access; fonts must be ready before any view renders. |
 | 2 | **Shared components:** `YellowBar`, `YellowTitleBar`, `RoundedButton`, Poppins `Font` extensions | These are primitives used by virtually every screen, not "polish." Building views without them forces refactoring later. |
-| 3 | **Persistence layer:** `DatabaseService` + `Item` model + `ItemStore` CRUD + file I/O (`saveFile`, fallback copy logic) + unit tests | Core logic verified in isolation. Define an error-handling contract here (`Result` or `throws`) so `CameraService`, `AudioService`, and `TCPClientService` follow the same pattern. |
+| 3 | **Persistence layer:** `DatabaseService` + `Item` model + `ItemStore` CRUD + file I/O (`saveFile`, fallback copy logic) + **`SessionLogService`** (create log file, immediate disk append, `UserDefaults` crash recovery, `LogAction` enum) + unit tests | Core logic verified in isolation. `SessionLogService` is persistence-adjacent and must exist before any view that logs user actions. |
 | 4 | **Audio service:** `AVAudioRecorder` + `AVAudioPlayer` wrapper (M4A/AAC) | Self-contained and easier than camera; builds confidence before tackling harder services. |
-| 5 | **TCP client service:** `Network.framework` `NWConnection` wrapper (`TCPClientService`), heartbeat, auto-reconnect, protocol models (`PayloadRecord`, `LogEntry`, `ConnectionState`), debug view layout | Must exist before `HomeView` (Step 7) so the `'3'` command handler and `ant.fill` debug button have a service to bind to. |
+| 5 | **TCP client service + DebugView:** `Network.framework` `NWConnection` wrapper (`TCPClientService`), heartbeat, auto-reconnect, protocol models, `DebugView` layout, **`SessionLogsView`** + **`SessionLogDetailView`** + `UIActivityViewController` share sheet bridge | Must exist before `HomeView` (Step 7) so the `'3'` command handler and `ant.fill` debug button have a service to bind to. Session log viewer is built here because it is developer-only UI attached to DebugView. |
 | 6 | **Camera service:** `AVCaptureSession` + `AVCapturePhotoOutput` + **`UIViewRepresentable` preview bridge** | Hardest service. The `UIViewRepresentable` wrapper for `AVCaptureVideoPreviewLayer` is non-trivial and must be treated as a first-class engineering task, not an afterthought. Debug with a simple scratch view before integrating into the deposit flow. |
-| 7 | **Navigation + Home:** `NavigationStack`, `AppState`, `HomeView` (with `ant.fill` debug sheet button + `'3'` ESP32 command handler), `InputNameView` | Establish routing and the root view before building deeper flows. |
+| 7 | **Navigation + Home:** `NavigationStack`, `AppState` (with `isSessionActive`, `sessionLog`), `HomeView` (welcome + mode-selection states, **End Session button**, `ant.fill` debug sheet button, `'3'` ESP32 command handler with session-gate), `InputNameView` | Establish routing, root view, and session lifecycle. End Session button sends lock command and plays `goodbye.m4a`. Flows return to mode-selection, keeping the session alive. |
 | 8 | **Deposit flow:** `PhotoAudioView` → `OpenDoorView` (now functional: sends `'2'` unlock / `'1'` lock via `TCPClientService`) | First real integration of camera + audio + TCP services. |
 | 9 | **Take flow:** `SelectItemView` → `ViewDepositView` | Depends on database + file validation already proven in step 3. |
 | 10 | **Memories flow:** `GalleryView` → `DetailView` | Read-only flow; safe to build last. |

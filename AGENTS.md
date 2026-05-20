@@ -20,16 +20,17 @@ Section 11 of the dev plan defines the exact sequence. You may **not** implement
 
 | # | Step | Dev-Plan Reference |
 |---|------|-------------------|
-| 1 | Project setup (Xcode, GRDB SPM, `Info.plist` permissions, ingest assets/fonts, register Poppins) | §11 Step 1, §2, §9, §10 |
+| 1 | Project setup (Xcode, GRDB SPM, `Info.plist` permissions, ingest assets/fonts, register Poppins, link `Network.framework`) | §11 Step 1, §2, §9, §10 |
 | 2 | Shared components (`YellowBar`, `YellowTitleBar`, `RoundedButton`, Poppins `Font` extensions) | §11 Step 2, §7 |
-| 3 | Persistence layer (`DatabaseService`, `Item` model, `ItemStore` CRUD, file I/O, unit tests) | §11 Step 3, §4 |
+| 3 | Persistence layer (`DatabaseService`, `Item` model, `ItemStore` CRUD, file I/O, `SessionLogService`, unit tests) | §11 Step 3, §4, §5.5 |
 | 4 | Audio service (`AVAudioRecorder` + `AVAudioPlayer`, M4A/AAC only) | §11 Step 4, §5.3 |
-| 5 | Camera service (`AVCaptureSession` + `AVCapturePhotoOutput` + `UIViewRepresentable` preview bridge) | §11 Step 5, §5.2 |
-| 6 | Navigation + Home (`NavigationStack`, `AppState`, `HomeView`, `InputNameView`) | §11 Step 6, §6.1, §6.2, §8 |
-| 7 | Deposit flow (`PhotoAudioView` → `OpenDoorView`) | §11 Step 7, §6.3, §6.4 |
-| 8 | Take flow (`SelectItemView` → `ViewDepositView`) | §11 Step 8, §6.5, §6.6 |
-| 9 | Memories flow (`GalleryView` → `DetailView`) | §11 Step 9, §6.7, §6.8 |
-| 10 | End-to-end testing & iPad optimization | §11 Step 10, §10 |
+| 5 | TCP client service + DebugView (`TCPClientService`, heartbeat, auto-reconnect, `DebugView`, `SessionLogsView`, `SessionLogDetailView`) | §11 Step 5, §5.4, §6.9, §6.10 |
+| 6 | Camera service (`AVCaptureSession` + `AVCapturePhotoOutput` + `UIViewRepresentable` preview bridge) | §11 Step 6, §5.2 |
+| 7 | Navigation + Home (`NavigationStack`, `AppState` with session state, `HomeView` with End Session button, `InputNameView`) | §11 Step 7, §6.1, §6.2, §8 |
+| 8 | Deposit flow (`PhotoAudioView` → `OpenDoorView`) | §11 Step 8, §6.3, §6.4 |
+| 9 | Take flow (`SelectItemView` → `ViewDepositView`) | §11 Step 9, §6.5, §6.6 |
+| 10 | Memories flow (`GalleryView` → `DetailView`) | §11 Step 10, §6.7, §6.8 |
+| 11 | End-to-end testing & iPad optimization | §11 Step 11, §10 |
 
 **Rules:**
 - You may NOT implement a later step before an earlier step is complete.
@@ -113,7 +114,7 @@ import GRDB
 ## 8. Session Start Behavior
 If this is the first message of a session:
 1. Verify `project-dev-plan.md` exists in the repo. If missing, ask the user to provide it.
-2. Scan the repo to determine which of the 10 implementation steps are already complete.
+2. Scan the repo to determine which of the 11 implementation steps are already complete.
 3. Report the current step status and either:
    - Propose the next incomplete step, or
    - Ask the user where they would like to begin.
