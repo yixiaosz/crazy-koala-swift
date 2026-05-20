@@ -66,11 +66,13 @@ crazy-koala-swift/
 ├── Components/
 │   ├── YellowBar.swift              # Simple yellow header bar
 │   └── RoundedButton.swift          # Simple button with corner radius
-└── Assets/
-    ├── fonts/
-    │   └── Poppins/                 # TTF files from /assets/fonts/
-    ├── images/                      # PNG assets from /assets/
-    └── sounds/                      # Audio assets (all M4A/AAC)
+├── Assets/
+│   ├── fonts/
+│   │   └── Poppins/                 # TTF files from /assets/fonts/
+│   ├── images/                      # PNG assets from /assets/
+│   └── sounds/                      # Audio assets (all M4A/AAC)
+└── Tests/
+    └── ItemStoreTests.swift         # Unit tests for persistence layer (§4, §5.5)
 
 ```
 
@@ -97,6 +99,8 @@ CREATE TABLE items (
 
 **GRDB mapping:** Create a Swift `struct Item: Codable, FetchableRecord, PersistableRecord` with properties matching these columns exactly. Use `Date` for timestamp columns.
 
+**Date format handling (Critical):** SQLite's `DEFAULT CURRENT_TIMESTAMP` stores timestamps as **TEXT** in `"YYYY-MM-DD HH:MM:SS"` format. GRDB's default `Date` encoding uses `timeIntervalSinceReferenceDate` (a `Double`), which is **incompatible**. To avoid data corruption or decoding failures, configure a `DateFormatter` with format `"yyyy-MM-dd HH:mm:ss"` and register it as the database's date decoding/encoding strategy when setting up the `DatabaseQueue`. All `Date` properties in the `Item` struct must round-trip correctly through this format.
+
 ### 4.2 CRUD Operations (Port from `/windows-version/database/db_operations.py`)
 
 Implement the following operations in `ItemStore.swift`:
@@ -104,8 +108,9 @@ Implement the following operations in `ItemStore.swift`:
 1. **`insertDeposit(name: String, depositPhotoPath: String?, depositAudioPath: String?)`**
    - Insert a new row with deposit paths.
 
-2. **`updateTaken(itemName: String, takenPhotoPath: String?, takenAudioPath: String?)`**
-   - Update the row matching `name`, setting `taken_photo_path`, `taken_audio_path`, and `taken_created_at = CURRENT_TIMESTAMP`.
+2. **`updateTaken(itemId: Int64, takenPhotoPath: String?, takenAudioPath: String?)`**
+   - Update the row matching `id` (primary key), setting `taken_photo_path`, `taken_audio_path`, and `taken_created_at = CURRENT_TIMESTAMP`.
+   - **Uses `id` instead of `name`** because the `name` column has no `UNIQUE` constraint. Matching by name could update multiple rows if duplicates exist. The `id` is obtained from `AppState.currentItem` during the Take flow.
 
 3. **`fetchAllItems() -> [Item]`**
    - Query rows where both `deposit_photo_path` and `taken_photo_path` are not NULL.
@@ -116,7 +121,9 @@ Implement the following operations in `ItemStore.swift`:
    - Validate that `deposit_photo_path` exists on disk. Return only valid items.
 
 5. **`fetchItemDetails(name: String) -> Item?`**
-   - Fetch a single row by name. Return nil if not found.
+   - Fetch a single row by name (`LIMIT 1`). Only deposit-related fields (`id`, `name`, `deposit_photo_path`, `deposit_audio_path`, `deposit_created_at`) are used by the caller; taken columns are expected to be `NULL` for unretrieved items.
+   - Return nil if not found.
+   - **Matches original:** `/windows-version/database/db_operations.py` `fetch_item_details()` only selects deposit columns. The Swift version may `SELECT *` for GRDB mapping convenience, but callers (e.g., `ViewDepositView`) must only display deposit fields.
 
 ### 4.3 File Storage Convention
 
@@ -133,7 +140,9 @@ Documents/
         └── {item_name}_taken_audio.m4a
 ```
 
-**Validation rule:** Never trust paths stored in the database alone. Always verify with `FileManager.default.fileExists(atPath:)` before displaying or returning an item. This matches the current `os.path.exists` validation in `/windows-version/database/db_operations.py`.
+**Path storage rule (Critical):** All paths stored in the database must be **relative to the `Documents/` directory** (e.g., `data/{item_name}/{item_name}_deposit_photo.jpg`). Never store absolute paths. The iOS sandbox container UUID can change across reinstalls and updates, which would break absolute paths. At runtime, resolve relative paths by prepending `FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!`.
+
+**Validation rule:** Never trust paths stored in the database alone. Always verify with `FileManager.default.fileExists(atPath:)` (using the resolved absolute path) before displaying or returning an item. This matches the current `os.path.exists` validation in `/windows-version/database/db_operations.py`.
 
 ---
 
@@ -164,6 +173,7 @@ Documents/
 - Save the resulting image to a temporary location as JPEG.
 - **Do not** implement manual rotation, BGR→RGB conversion, or texture blitting — `AVCaptureSession` handles this natively.
 - Provide a method to start/stop the session to conserve battery.
+- **Permission handling:** On first use, check `AVCaptureDevice.authorizationStatus(for: .video)`. If `.denied` or `.restricted`, show an alert explaining that camera access is required for the app to function, with a button to open Settings (`UIApplication.openSettingsURLString`). If the user proceeds without granting permission, gracefully fall back to using `default_photo.png` for all captures.
 
 ### 5.3 AudioService
 
@@ -173,10 +183,11 @@ Documents/
 
 **Requirements:**
 - Configure `AVAudioSession` with `.playAndRecord` category.
-- **Recording:** Use `AVAudioRecorder` with settings: **AAC (`kAudioFormatMPEG4AAC`)**, 44.1 kHz, 1 channel, 64–96 kbps. Support a maximum duration of 30 seconds and a timer callback for UI updates.
+- **Recording:** Use `AVAudioRecorder` with settings: **AAC (`kAudioFormatMPEG4AAC`)**, 44.1 kHz, 1 channel, 64–96 kbps. Support a maximum duration of 60 seconds and a timer callback for UI updates.
 - **Format note:** M4A (AAC) is used instead of WAV to reduce file size. `AVAudioRecorder` encodes AAC in hardware natively.
 - **Playback:** Use `AVAudioPlayer` initialized with a file URL. Support stopping and restarting.
 - Store temporary recordings in the app's `tmp` directory.
+- **Permission handling:** On first use, check `AVAudioSession.sharedInstance().recordPermission`. If `.denied`, show an alert explaining that microphone access is required, with a button to open Settings. If the user proceeds without granting permission, gracefully fall back to using `default_audio.m4a` for all recordings.
 
 ---
 
@@ -212,7 +223,8 @@ Documents/
 - Heartbeat: auto-send `'0'` every 1 s if no other command sent.
 - RX: read bytes into a buffer, validate ASCII `'0'`–`'F'`, discard invalid bytes.
 - Published diagnostics: `ConnectionState`, `lastRx`, `lastTx`, `fpsHistory` (5 s rolling), `errorLog` (last 20), `rawHexDump` (last 10 bytes), `localIPAddress`.
-- Methods: `start()`, `stop()`, `send(_:)`, `forceReconnect()`.
+- Methods: `start()`, `stop()`, `send(_:)`, `forceReconnect()`, `sendLockAndVerify(timeout: TimeInterval, retries: Int, completion: @escaping (Bool) -> Void)`.
+- **Lock ACK verification (`sendLockAndVerify`):** Sends `'1'` (lock), then waits for the ESP32 to respond with `'1'` (state: locked) within the specified timeout (default 2 s). If no `'1'` response is received, retries once. If the retry also times out, calls completion with `false` so the caller can display a warning to the user. Used by the **End Session** flow (§6.1) as a safety-critical operation.
 - Thread-safe: use a dedicated `DispatchQueue` for all `NWConnection` I/O; publish to main queue.
 
 ---
@@ -291,7 +303,8 @@ Home
 │   ├── Take Flow
 │   │   ├── Select Item (grid)
 │   │   ├── View Deposit Info
-│   │   └── Open Door
+│   │   ├── Open Door
+│   │   └── Photo + Audio (reuses shared PhotoAudioView in take mode)
 │   └── Happy Memories
 │       ├── Gallery (grid)
 │       └── Detail (side-by-side)
@@ -318,7 +331,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - Tapping an option sets a shared navigation/app state (`mode`) and pushes the first screen of that flow.
   - **End Session button:** A clearly visible button (e.g., red-outlined pill) on the mode-selection view. Tapping it:
     1. Calls `SessionLogService.endSession()`.
-    2. Sends TCP `'1'` (lock) to the ESP32 via `TCPClientService` as a safety fail-safe.
+    2. Sends lock with ACK verification via `TCPClientService.sendLockAndVerify(timeout: 2, retries: 1)` (§5.4). If the ACK is not received after the retry, display a warning alert (e.g., "Door lock could not be confirmed. Please verify manually.") but still proceed to step 3.
     3. Plays `goodbye.m4a`.
     4. Returns to the welcome screen.
 - **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner **of the welcome screen only**. Tapping it presents `DebugView` as a sheet. This ensures developers can access diagnostics and session logs **without starting a session**.
@@ -336,9 +349,11 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - A single `TextField` for entering the item name.
 - **Use the native iPadOS keyboard.** Do NOT build a custom keyboard.
 - A "Next" button that validates:
-  - Name is not empty.
+  - Name is not empty (after trimming leading/trailing whitespace).
+  - Name contains only allowed characters: **alphanumeric, spaces, hyphens, and underscores**. Reject any name containing `/`, `\`, `..`, `:`, or other filesystem-unsafe characters.
+  - Name does not exceed **50 characters**.
   - A folder `data/{name}` does not already exist (duplicate check).
-- If invalid, show a simple alert (`alert` modifier in SwiftUI).
+- If invalid, show a simple alert (`alert` modifier in SwiftUI) with a specific message for each validation failure.
 - On success, pass the name to `PhotoAudioView` and set `mode = deposit`.
 
 ### 6.3 Shared / PhotoAudioView
@@ -353,7 +368,8 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - Button to start/stop recording.
   - Label showing recording duration (e.g., "Recording... 5s").
   - Maximum duration: 60 seconds.
-- **Bottom:** "Next" button.
+- **Bottom:** "Back" button and "Next" button.
+  - **Back button:** Discards any temporary photo/audio files, stops the camera session and any active recording, and navigates back to the previous screen (`InputNameView` in deposit mode, `ViewDepositView` in take mode). Does **not** modify the database or create any folders.
 - **Deposit mode** (`mode == deposit`) — On "Next":
   1. Create `data/{item_name}/` folder.
   2. Move the captured photo (or copy `default_photo.png` if none captured) to `data/{item_name}/{item_name}_deposit_photo.jpg`.
@@ -361,12 +377,14 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   4. Call `insertDeposit` in GRDB with the final paths.
   5. Clear temporary files.
   6. Navigate to `OpenDoorView` with `mode = deposit`.
+  - **Rollback on failure:** If any step (1–4) fails, undo all prior steps: delete the `data/{item_name}/` folder and any files already moved into it, do not insert into the database, and show an error alert. The user remains on `PhotoAudioView` to retry. Log the error via `SessionLogService`.
 - **Take mode** (`mode == take`) — On "Next":
   1. Move the captured photo (or copy `default_photo.png`) to `data/{item_name}/{item_name}_taken_photo.jpg`.
   2. Move the recorded audio (or copy `default_audio.m4a`) to `data/{item_name}/{item_name}_taken_audio.m4a`.
-  3. Call `updateTaken` in GRDB with the final paths.
+  3. Call `updateTaken` in GRDB with the item's `id` (from `AppState.currentItem`) and the final paths.
   4. Clear temporary files.
   5. Return to `HomeView` **mode-selection view** (session stays active).
+  - **Rollback on failure:** If any step (1–3) fails, delete any taken photo/audio files already moved into the item folder, do not update the database, and show an error alert. The user remains on `PhotoAudioView` to retry. Log the error via `SessionLogService`.
 
 **Default fallback behavior (port from `/windows-version/screens/deposit/photo_audio_record.py`):**
 - If the user proceeds without taking a photo, copy the bundled `default_photo.png` into the item folder.
@@ -382,6 +400,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - **Deposit:** "Open the door to store the item."
   - **Take:** "Open the door to retrieve the item."
 - **"Open Door" button:** Sends `'2'` (unlock) to the ESP32 via `TCPClientService`.
+  - **Disabled state:** The button must be **disabled** when `TCPClientService.connectionState != .connected`. Display a visible warning (e.g., "ESP32 not connected") below or near the button when disabled, so the user understands why the door cannot be opened.
   - **Audio cue:** Play `open_door.m4a` concurrently with sending the TCP `'2'` unlock command (ported from `open_door.wav` in `/windows-version/main.py`).
 - The user places/retrieves the item.
 - **"Done" button:** Sends `'1'` (lock) to the ESP32, then:
@@ -452,6 +471,14 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - **Error Log:** Append-only list of the last 20 errors (TCP drops, parse errors, timeouts).
   - **Manual Command Injector:** Grid of 16 buttons (`0`–`F`). Tapping sends that character immediately.
   - **Session Logs:** Button that pushes/presents `SessionLogsView` (§6.10).
+  - **Export All Data:** Button that creates a **zip archive** of the entire `Documents/data/` directory (all item folders with photos and audio) and presents a `UIActivityViewController` share sheet. Use `NSFileCoordinator.coordinate(readingItemAt:options:.forUploading)` to create the zip — this is a built-in iOS API that automatically zips a directory, no external dependencies required. The zip is created in a temporary location and cleaned up after sharing.
+  - **Erase All Data:** Button (styled destructively, e.g., red text) that **deletes all user-generated data**. Requires a confirmation alert ("This will permanently delete all items, photos, audio recordings, and session logs. This cannot be undone."). On confirmation:
+    1. Delete all contents of `Documents/data/` directory.
+    2. Delete all rows from the `items` table in the database (or delete and recreate `items.db`).
+    3. Delete all session log files in `Documents/logs/`.
+    4. Clear any active session state (`SessionLogService`, `AppState.currentItem`).
+    5. Return to the welcome screen.
+  - **Note:** The app is designed for single-day use. After the event, developers use **Export All Data** to archive everything, then **Erase All Data** (or reinstall via Xcode) to reset for next use.
 - Use standard SwiftUI components (`ScrollView`, `LazyVGrid`, `Grid`). No custom canvas drawing.
 
 ### 6.10 Debug / SessionLogsView & SessionLogDetailView
@@ -503,7 +530,7 @@ The original Kivy `ScreenManager` maintains shared state. Replace this with a si
 ```
 AppState (shared)
 ├── currentItem: Item?           # Currently selected item for Take/Memories flows
-├── mode: Mode?                  # .deposit or .take
+├── mode: Mode?                  # .deposit, .take, or .memories
 ├── tcpClient: TCPClientService  # Shared ESP32 TCP connection (§5.4)
 ├── sessionLog: SessionLogService # Shared session logger (§5.5)
 ├── isSessionActive: Bool        # true when in mode-selection view or any flow
@@ -513,6 +540,7 @@ AppState (shared)
 **Screen flow logic (port from `/windows-version/main.py`):**
 - `MyScreenManager.switch_to(screenName, mode)` → push corresponding view + set `appState.mode`.
 - `current_item` dictionary → strongly typed `AppState.currentItem`.
+- **Mode enum:** `Mode` must include `.deposit`, `.take`, and `.memories`. Set `.memories` when the user taps Happy Memories to avoid stale state from a previous Deposit or Take flow. Clear `mode` to `nil` when returning to the mode-selection view.
 - **Session lifecycle:** `isSessionActive` is set to `true` on welcome→mode-selection transition, and `false` on End Session. If `isSessionActive == true`, ESP32 `'3'` is ignored.
 
 ---
@@ -541,7 +569,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 - `start_interact.m4a` (original `start_interact.wav`) → Play when the user first engages (welcome → mode-selection transition).
 - `meet_people.m4a` (original `meet_people.wav`) → Play when the user selects Deposit or Take.
 - `open_door.m4a` (original `open_door.wav`) → Play on the "Open Door" button tap in `OpenDoorView` (before or concurrently with the TCP `'2'` unlock command).
-- `goodbye.m4a` (original `goodbye.wav`) → Play when the flow completes and the app navigates back to `HomeView`.
+- `goodbye.m4a` (original `goodbye.wav`) → Play **only when the user taps "End Session"** on the mode-selection view.
 
 ---
 
@@ -554,6 +582,12 @@ In the original Python app, these sounds were triggered by external hardware eve
 5. **Font registration:** Add all Poppins TTF files to the app target and list them under `UIAppFonts` in `Info.plist`.
 6. **Error handling:** Log errors to console (matching original `print` debugging style). Do not build elaborate error UI beyond simple alerts.
 7. **Log storage:** Session logs are stored in `Documents/logs/` inside the app sandbox. They are never automatically deleted. Developers access them via the hidden `SessionLogsView` inside `DebugView`.
+8. **Kiosk deployment (Guided Access):** The app is designed to run as a kiosk. Deploy using **iPadOS Guided Access** (Settings → Accessibility → Guided Access) to lock the iPad into single-app mode. This prevents users from exiting the app, accessing Control Center, or triggering Notification Center. The dev plan assumes Guided Access is enabled in production; no in-app kiosk lockdown logic is required.
+9. **App lifecycle handling:**
+   - **Background transition:** Stop `AVCaptureSession` and any active `AVAudioRecorder` when the app enters background (`scenePhase == .inactive` or `.background`). Restart the camera session when returning to foreground if the user was on `PhotoAudioView`.
+   - **Audio session interruption:** Observe `AVAudioSession.interruptionNotification`. If an interruption begins during recording, stop the recording gracefully and update the UI. If the interruption ends, do not auto-resume — let the user manually restart.
+   - **TCP connection in background:** `NWConnection` will be suspended by iOS when the app is backgrounded. On return to foreground, check connection state and trigger reconnect if needed. With Guided Access enabled, backgrounding should not occur during normal use.
+10. **Data export:** The app supports batch export of all item data (photos, audio) as a zip archive and full data erasure via the `DebugView` (§6.9). This is the primary mechanism for archiving event data before resetting the device.
 
 ---
 
@@ -615,6 +649,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 ### 12.3 Core Loop Behavior
 
 - **Heartbeat:** If no transmission in the last **1 s**, send `'0'` to iPad.
+- **Command ACK:** Upon receiving `'1'` (lock) or `'2'` (unlock), the ESP32 must **immediately** send back the corresponding state code (`'1'` or `'2'`) as an acknowledgment before performing the action (e.g., LED feedback). This allows the iPad to verify that the command was received (see `sendLockAndVerify` in §5.4).
 - **Fail-safe:** If no valid command for **300 s**, set state to `LOCKED` and send `'1'` to iPad.
 - **BOOT button (GPIO0):** Debounced press sends `'3'` to iPad.
 - **RGB LED (GPIO48):** Action indicator using Adafruit NeoPixel.

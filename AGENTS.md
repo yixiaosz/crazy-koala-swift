@@ -13,7 +13,7 @@ Before every action, consult these documents in this priority order:
 
 3. **Previously implemented files** in the repo — Do not contradict existing code.
 
-**Conflict Resolution:** If `project-dev-plan.md` conflicts with any general software engineering advice, common Swift patterns, or instructions in this `AGENT.md`, **the dev plan wins unconditionally.**
+**Conflict Resolution:** If `project-dev-plan.md` conflicts with any general software engineering advice, common Swift patterns, or instructions in this `AGENTS.md`, **the dev plan wins unconditionally.**
 
 ## 3. Implementation Order Lock (Mandatory)
 Section 11 of the dev plan defines the exact sequence. You may **not** implement a later step before an earlier step is complete and validated.
@@ -118,3 +118,21 @@ If this is the first message of a session:
 3. Report the current step status and either:
    - Propose the next incomplete step, or
    - Ask the user where they would like to begin.
+
+## 9. Testing Strategy
+
+### General Approach
+- Use **XCTest** as the test framework for all unit tests.
+- Test files live in the `Tests/` directory at the project root (see `project-dev-plan.md` §3).
+- Test file naming convention: `{ClassName}Tests.swift` (e.g., `ItemStoreTests.swift`).
+
+### Step 3: Persistence Layer (Required)
+Unit tests are **mandatory** for the persistence layer. Cover at minimum:
+- **`ItemStore` CRUD operations:** `insertDeposit`, `updateTaken`, `fetchAllItems`, `fetchUnretrievedItems`, `fetchItemDetails`. Include edge cases: empty database, missing files on disk, and duplicate names.
+- **File validation:** Verify that fetch methods skip items whose referenced files do not exist on disk.
+- **`SessionLogService`:** Verify log file creation, immediate disk append (no buffering), crash recovery via `UserDefaults`, and full session lifecycle (`startSession` → `log` → `endSession`).
+- **Rollback:** Verify that partial failures during deposit/take file operations clean up correctly (see `project-dev-plan.md` §6.3).
+
+### Other Steps (Recommended)
+- Tests are encouraged but not mandatory for Steps 4–10.
+- Prioritize testing service logic (e.g., `AudioService` recording/playback state transitions, `TCPClientService` connection state machine) over UI views.
