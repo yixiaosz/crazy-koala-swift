@@ -1,14 +1,30 @@
 /*
-  ESP32-S3 ↔ iPad TCP Control Link — Proof-of-Concept Firmware
+  ESP32-S3 ↔ iPad TCP Control Link — Production Firmware
   Target: ESP32-S3-N16R8 (Arduino board: "ESP32S3 Dev Module")
-  
+  Reference: project-dev-plan.md §12
+
+  Protocol (iPad → ESP32):
+    '0' = Heartbeat
+    '1' = Lock
+    '2' = Unlock
+    '3'–'F' = Reserved
+
+  Protocol (ESP32 → iPad):
+    '0' = Heartbeat
+    '1' = State: Locked
+    '2' = State: Unlocked
+    '3' = Enter Home View (BOOT button pressed)
+    '4'–'F' = Reserved
+
   Features:
-    - Wi-Fi STA with static IP
+    - Wi-Fi STA with static IP (192.168.0.100)
     - TCP server on port 8080 (single persistent client)
     - Single-byte ASCII command protocol ('0'–'F')
-    - WS2812 RGB LED on GPIO48 (NeoPixel)
+    - Command ACK: '1'/'2' immediately echoed back as state confirmation
+    - WS2812 RGB LED on GPIO48 (NeoPixel) for action feedback
     - 1 Hz heartbeat (auto-TX '0' when idle)
-    - 300 s fail-safe timer (locks placeholder state on comms loss)
+    - 300 s fail-safe timer (auto-lock on comms loss, sends '1')
+    - BOOT button (GPIO0) sends '3' to iPad
     - Fully non-blocking (millis()-based scheduling)
 */
 
@@ -58,7 +74,7 @@ unsigned long lastRxTime      = 0;  // Last time we received anything from iPad
 unsigned long lastValidRxTime = 0;  // Last time we received a valid command byte
 
 // Fail-safe / state machine
-enum LockState { LOCKED, UNLOCKED, FAULT };
+enum LockState { LOCKED, UNLOCKED };
 LockState lockState = LOCKED;   // Start conservative (locked)
 bool failSafeTriggered = false;
 
@@ -187,16 +203,16 @@ void loop() {
   }
 
   // --------------------------------------------------------------------------
-  // 6.4 Fail-safe timer: no valid RX for 300 s → lock
+  // 6.4 Fail-safe timer: no valid RX for 300 s → lock (§12.3)
   // --------------------------------------------------------------------------
   if (!failSafeTriggered && (now - lastValidRxTime) >= FAILSAFE_TIMEOUT_MS) {
     failSafeTriggered = true;
     lockState = LOCKED;
     Serial.println("[FAILSAFE] No valid command for 300s. State -> LOCKED.");
 
-    // Optional: notify iPad if connected
+    // Notify iPad if connected (§12.3: send '1' = State: Locked)
     if (tcpClient && tcpClient.connected()) {
-      sendByte('2');  // State: Locked
+      sendByte('1');
     }
   }
 
@@ -216,8 +232,8 @@ void loop() {
   if (bootButtonState == LOW && bootButtonLastState == HIGH &&
       (now - bootButtonDebounceTime) > BUTTON_DEBOUNCE_MS) {
     bootButtonDebounceTime = now;
-    Serial.println("[ACT] BOOT button pressed -> sending '5'");
-    sendByte('5');
+    Serial.println("[ACT] BOOT button pressed -> sending '3'");
+    sendByte('3');
   }
   bootButtonLastState = bootButtonState;
 
@@ -228,7 +244,7 @@ void loop() {
 }
 
 // ============================================================================
-// 7. COMMAND HANDLER
+// 7. COMMAND HANDLER (§12.2, §12.3)
 // ============================================================================
 void handleCommand(char cmd) {
   Serial.print("[RX] Command: ");
@@ -239,41 +255,40 @@ void handleCommand(char cmd) {
 
   switch (cmd) {
     case '0':
-      // Heartbeat — no action, timer already reset in loop()
+      // Heartbeat — no LED change (§12.3)
       Serial.println("[ACT] Heartbeat received.");
       break;
 
     case '1':
-      // LED Test — solid red, auto-off after 1 s (non-blocking)
-      Serial.println("[ACT] LED Test -> START");
+      // Lock command (§12.2)
+      // ACK immediately with '1' (State: Locked) before LED action (§12.3)
+      Serial.println("[ACT] LOCK command received.");
+      lockState = LOCKED;
+      sendByte('1');
+      // Red LED for 1 s (§12.3)
       setLEDColor(255, 0, 0);
-      sendByte('1');  // LED Test Ack
       ledTestActive = true;
       ledTestStartTime = millis();
       break;
 
     case '2':
-      // Lock (placeholder)
-      Serial.println("[ACT] Command LOCK (placeholder, no HW action)");
-      lockState = LOCKED;
-      // No TX response required by spec for '2'/'3' in normal operation
-      break;
-
-    case '3':
-      // Unlock (placeholder)
-      Serial.println("[ACT] Command UNLOCK (placeholder, no HW action)");
+      // Unlock command (§12.2)
+      // ACK immediately with '2' (State: Unlocked) before LED action (§12.3)
+      Serial.println("[ACT] UNLOCK command received.");
       lockState = UNLOCKED;
-      break;
-
-    case '4':
-      // Fault (placeholder)
-      Serial.println("[ACT] Command FAULT (placeholder, no HW action)");
-      lockState = FAULT;
+      sendByte('2');
+      // Green LED for 1 s (§12.3)
+      setLEDColor(0, 255, 0);
+      ledTestActive = true;
+      ledTestStartTime = millis();
       break;
 
     default:
-      // '5'–'F' reserved — no action
-      Serial.println("[ACT] Reserved command, no action.");
+      // '3'–'F' reserved — blue LED for 1 s (§12.3)
+      Serial.println("[ACT] Reserved command, blue LED.");
+      setLEDColor(0, 0, 255);
+      ledTestActive = true;
+      ledTestStartTime = millis();
       break;
   }
 }

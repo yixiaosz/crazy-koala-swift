@@ -49,6 +49,7 @@ crazy-koala-swift/
 │   └── SessionLogService.swift      # Per-session timestamped action logging (§5.5)
 ├── Views/
 │   ├── HomeView.swift               # Landing screen + mode selection + End Session (§6.1)
+│   ├── PromptView.swift             # Reusable transition screen before PhotoAudioView (§6.2a, §6.2b)
 │   ├── DepositFlow/
 │   │   ├── InputNameView.swift      # Text input for item name
 │   │   ├── PhotoAudioView.swift     # Camera preview + audio recording
@@ -100,6 +101,8 @@ CREATE TABLE items (
 **GRDB mapping:** Create a Swift `struct Item: Codable, FetchableRecord, PersistableRecord` with properties matching these columns exactly. Use `Date` for timestamp columns.
 
 **Date format handling (Critical):** SQLite's `DEFAULT CURRENT_TIMESTAMP` stores timestamps as **TEXT** in `"YYYY-MM-DD HH:MM:SS"` format. GRDB's default `Date` encoding uses `timeIntervalSinceReferenceDate` (a `Double`), which is **incompatible**. To avoid data corruption or decoding failures, configure a `DateFormatter` with format `"yyyy-MM-dd HH:mm:ss"` and register it as the database's date decoding/encoding strategy when setting up the `DatabaseQueue`. All `Date` properties in the `Item` struct must round-trip correctly through this format.
+
+**Display timezone:** Timestamps are stored in UTC. When displaying timestamps to the user (e.g., in `ViewDepositView`, `DetailView`), use a separate `displayDateFormatter` configured with `TimeZone.current` (device local time) to convert from UTC to the local timezone.
 
 ### 4.2 CRUD Operations (Port from `/windows-version/database/db_operations.py`)
 
@@ -321,10 +324,13 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 2. **Mode-selection view** — shown during an active session.
 
 **Requirements:**
-- **Welcome screen:** Display a simple layout with the koala logo/door image and welcome text. A **"Start" button** (and only the Start button) advances to the mode-selection view.
+- **Welcome screen:** `HStack` layout — `door_close` image on the **left**, text and button on the **right** (left-aligned).
+  - **Image:** `door_close`, max height 500pt.
+  - **Text:** "Connect to Our \nCommunity \nTogether\n" (Poppins Bold, 48pt) followed by "for Better Future" (Poppins Regular, 42pt).
+  - **Button:** "Press Koala's Nose to Start" — advances to the mode-selection view.
   - **Receiving `'3'` from the ESP32 also advances from welcome to mode-selection, but only if no session is currently active.**
   - On transition to mode-selection, call `SessionLogService.startSession(trigger:)`.
-- **Mode-selection view:** Shows three simple buttons/tappable areas:
+- **Mode-selection view:** Shows three simple buttons/tappable areas (each with a 200×200pt icon and Poppins Bold 32pt label):
   1. **Deposit**
   2. **Take**
   3. **Happy Memories**
@@ -337,7 +343,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - **Debug button:** A small `ant.fill` SF Symbol button, no border or background color, placed at the bottom-left corner **of the welcome screen only**. Tapping it presents `DebugView` as a sheet. This ensures developers can access diagnostics and session logs **without starting a session**.
 - **Audio cues (mapped from `/windows-version/main.py`):**
   - Play `start_interact.m4a` when transitioning from the welcome screen to the mode-selection view.
-  - Play `meet_people.m4a` when the user taps **Deposit** or **Take**.
+  - ~~Play `meet_people.m4a` when the user taps **Deposit** or **Take**.~~ **Removed:** `meet_people.m4a` is intended for the robot's obstacle avoidance scenario, not for mode selection. It is no longer played in the app.
   - Play `goodbye.m4a` **only when the user taps End Session** (not on flow completion).
 - **Keep it minimal.** No complex custom layouts. A `VStack` or `HStack` of buttons is sufficient.
 
@@ -354,7 +360,28 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - Name does not exceed **50 characters**.
   - A folder `data/{name}` does not already exist (duplicate check).
 - If invalid, show a simple alert (`alert` modifier in SwiftUI) with a specific message for each validation failure.
-- On success, pass the name to `PhotoAudioView` and set `mode = deposit`.
+- Prompt text: "Enter a name\nfor the item you would like to deposit".
+- On success, pass the name to **DepositPromptView** (transition screen) and set `mode = deposit`.
+
+### 6.2a DepositPromptView (Transition Screen)
+
+**Purpose:** Shown between `InputNameView` and `PhotoAudioView` in the deposit flow.
+
+**Requirements:**
+- Display message: "Give your item a personal touch — add a photo or record a quick audio message."
+- A "Continue" button navigates to `PhotoAudioView`.
+- A "Back" button returns to `InputNameView`.
+
+### 6.2b TakePromptView (Transition Screen)
+
+**Purpose:** Shown between `OpenDoorView` (take mode) and `PhotoAudioView` in the take flow.
+
+**Requirements:**
+- Display message: "A photo or voice note for the item you're taking? It'll be saved to the Happy Memories."
+- A "Continue" button navigates to `PhotoAudioView`.
+- A "Back" button returns to the previous screen.
+
+**Implementation:** Both prompts are implemented as a single reusable `PromptView` with configurable `message` and `destination` parameters.
 
 ### 6.3 Shared / PhotoAudioView
 
@@ -400,7 +427,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
   - **Deposit:** "Open the door to store the item."
   - **Take:** "Open the door to retrieve the item."
 - **"Open Door" button:** Sends `'2'` (unlock) to the ESP32 via `TCPClientService`.
-  - **Disabled state:** The button must be **disabled** when `TCPClientService.connectionState != .connected`. Display a visible warning (e.g., "ESP32 not connected") below or near the button when disabled, so the user understands why the door cannot be opened.
+  - **Disabled state:** The button must be **disabled** when `TCPClientService.connectionState != .connected`. Display a visible warning (e.g., "Cannot connect to the lock") below or near the button when disabled, so the user understands why the door cannot be opened.
   - **Audio cue:** Play `open_door.m4a` concurrently with sending the TCP `'2'` unlock command (ported from `open_door.wav` in `/windows-version/main.py`).
 - The user places/retrieves the item.
 - **"Done" button:** Sends `'1'` (lock) to the ESP32, then:
@@ -452,6 +479,7 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - Title bar shows the item name.
 - "Back" button returns to `GalleryView`.
 - Play buttons load the respective audio files via `AudioService`.
+- **Audio button UX:** Only the button that is currently playing should show "Stop Audio". The other button remains in its default label. When playback finishes (naturally or by tapping stop), the button reverts immediately (no fade animation). If a different audio button is tapped while one is playing, the current playback stops and the new one starts.
 
 ---
 
@@ -521,6 +549,18 @@ Use a simple `NavigationStack` or custom navigation state object to manage trans
 - Use Poppins font.
 - Implement as a reusable SwiftUI `View` modifier or wrapper around `Button`.
 
+### 7.3 BundleImage
+
+**File:** `App/BundleImage.swift`
+
+**Responsibility:** Load images from the app bundle (loose resource files in `Resources/Images/`), not from the Asset Catalog (`.xcassets`). SwiftUI's `Image("name")` only searches the Asset Catalog; `UIImage(named:)` searches both the Asset Catalog and the app bundle.
+
+**Requirements:**
+- Use `UIImage(named:)` to load the image, then wrap in `Image(uiImage:)`.
+- Accept optional `maxWidth` and `maxHeight` for sizing.
+- Show a placeholder SF Symbol (`photo`) if the image is not found.
+- **All PNG assets** from `Resources/Images/` (e.g., `simple_logo`, `deposit`, `take`, `happy`, `door_open`, `door_close`, `Microphone`, `Trumpet`, `default_photo`) must be loaded via `BundleImage`, not `Image("name")`.
+
 ---
 
 ## 8. App State / Navigation
@@ -559,7 +599,7 @@ Ingest the following assets from the repo root `/assets/` folder into the Xcode 
 | `open_door.m4a` | Played when the "Open Door" button is tapped in `OpenDoorView` (ported from `open_door.wav` in `/windows-version/main.py`) |
 | `goodbye.m4a` | Played **only when the user taps "End Session"** (ported from `goodbye.wav` in `/windows-version/main.py`) |
 | `start_interact.m4a` | Played when advancing from welcome to mode-selection in `HomeView` (ported from `start_interact.wav` in `/windows-version/main.py`) |
-| `meet_people.m4a` | Played when the user begins a Deposit or Take flow (ported from `meet_people.wav` in `/windows-version/main.py`) |
+| `meet_people.m4a` | **Not used in the iPad app.** Originally for the robot's obstacle avoidance. Kept in assets for potential future robot integration. |
 | `Microphone.png` | Recording status icon |
 | `Trumpet.png` | Audio play button icon |
 | `Poppins/` (all TTF files) | Required brand font |
@@ -567,7 +607,7 @@ Ingest the following assets from the repo root `/assets/` folder into the Xcode 
 **Audio cue mapping (ported from `/windows-version/main.py`):**
 In the original Python app, these sounds were triggered by external hardware events. In the iPad rewrite they are played locally by `AudioService` at the equivalent lifecycle moments:
 - `start_interact.m4a` (original `start_interact.wav`) → Play when the user first engages (welcome → mode-selection transition).
-- `meet_people.m4a` (original `meet_people.wav`) → Play when the user selects Deposit or Take.
+- `meet_people.m4a` (original `meet_people.wav`) → **Not used.** Intended for robot obstacle avoidance, not mode selection.
 - `open_door.m4a` (original `open_door.wav`) → Play on the "Open Door" button tap in `OpenDoorView` (before or concurrently with the TCP `'2'` unlock command).
 - `goodbye.m4a` (original `goodbye.wav`) → Play **only when the user taps "End Session"** on the mode-selection view.
 
@@ -588,6 +628,7 @@ In the original Python app, these sounds were triggered by external hardware eve
    - **Audio session interruption:** Observe `AVAudioSession.interruptionNotification`. If an interruption begins during recording, stop the recording gracefully and update the UI. If the interruption ends, do not auto-resume — let the user manually restart.
    - **TCP connection in background:** `NWConnection` will be suspended by iOS when the app is backgrounded. On return to foreground, check connection state and trigger reconnect if needed. With Guided Access enabled, backgrounding should not occur during normal use.
 10. **Data export:** The app supports batch export of all item data (photos, audio) as a zip archive and full data erasure via the `DebugView` (§6.9). This is the primary mechanism for archiving event data before resetting the device.
+11. **Light mode only.** Set `UIUserInterfaceStyle` to `Light` in `Info.plist`. The app does not adapt to dark mode.
 
 ---
 

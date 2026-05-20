@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Crazy Koala needs camera access to take photos of deposited and retrieved items.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Crazy Koala needs microphone access to record audio messages for deposited and retrieved items.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Crazy Koala needs local network access to communicate with the ESP32 door controller.</string>
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Poppins-Regular.ttf</string>
+		<string>Poppins-Bold.ttf</string>
+		<string>Poppins-ExtraBold.ttf</string>
+		<string>Poppins-Medium.ttf</string>
+		<string>Poppins-Light.ttf</string>
+		<string>Poppins-Italic.ttf</string>
+		<string>Poppins-LightItalic.ttf</string>
+	</array>
+</dict>
+</plist>

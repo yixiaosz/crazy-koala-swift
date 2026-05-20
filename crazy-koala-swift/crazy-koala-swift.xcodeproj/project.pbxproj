@@ -6,13 +6,32 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		9AB549CC2FBD80E500B764B2 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 9AB549CB2FBD80E500B764B2 /* GRDB */; };
+		9AB549CF2FBD813E00B764B2 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9AB549CE2FBD813E00B764B2 /* Network.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		9A7994012FBD48DC00DB3F49 /* crazy-koala-swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "crazy-koala-swift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9AB549CE2FBD813E00B764B2 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		9AB549D02FBD828200B764B2 /* Exceptions for "crazy-koala-swift" folder in "crazy-koala-swift" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9A7994002FBD48DC00DB3F49 /* crazy-koala-swift */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9A7994032FBD48DC00DB3F49 /* crazy-koala-swift */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				9AB549D02FBD828200B764B2 /* Exceptions for "crazy-koala-swift" folder in "crazy-koala-swift" target */,
+			);
 			path = "crazy-koala-swift";
 			sourceTree = "<group>";
 		};
@@ -23,6 +42,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9AB549CC2FBD80E500B764B2 /* GRDB in Frameworks */,
+				9AB549CF2FBD813E00B764B2 /* Network.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -33,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				9A7994032FBD48DC00DB3F49 /* crazy-koala-swift */,
+				9AB549CD2FBD813E00B764B2 /* Frameworks */,
 				9A7994022FBD48DC00DB3F49 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +65,14 @@
 				9A7994012FBD48DC00DB3F49 /* crazy-koala-swift.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		9AB549CD2FBD813E00B764B2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9AB549CE2FBD813E00B764B2 /* Network.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -65,6 +95,7 @@
 			);
 			name = "crazy-koala-swift";
 			packageProductDependencies = (
+				9AB549CB2FBD80E500B764B2 /* GRDB */,
 			);
 			productName = "crazy-koala-swift";
 			productReference = 9A7994012FBD48DC00DB3F49 /* crazy-koala-swift.app */;
@@ -94,6 +125,9 @@
 			);
 			mainGroup = 9A7993F82FBD48DC00DB3F49;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				9AB549CA2FBD80E500B764B2 /* XCRemoteSwiftPackageReference "GRDB" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9A7994022FBD48DC00DB3F49 /* Products */;
 			projectDirPath = "";
@@ -256,11 +290,13 @@
 				DEVELOPMENT_TEAM = 2NP7C3Z52J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "crazy-koala-swift/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -269,12 +305,16 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zhang.crazy-koala-swift";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Debug;
 		};
@@ -288,11 +328,13 @@
 				DEVELOPMENT_TEAM = 2NP7C3Z52J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "crazy-koala-swift/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -301,12 +343,16 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zhang.crazy-koala-swift";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Release;
 		};
@@ -332,6 +378,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9AB549CA2FBD80E500B764B2 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9AB549CB2FBD80E500B764B2 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9AB549CA2FBD80E500B764B2 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9A7993F92FBD48DC00DB3F49 /* Project object */;
 }
