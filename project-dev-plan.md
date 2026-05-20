@@ -456,7 +456,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 
 ---
 
-## 11. Implementation Order (Revised)
+## 11. Implementation Order
 
 | Step | Task | Rationale |
 |------|------|-----------|
@@ -478,7 +478,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 
 **Target:** ESP32-S3-N16R8 (Arduino IDE board target: `ESP32S3 Dev Module`)
 
-### 12.1 Network Configuration (Hardcoded)
+### 12.1 Network Configuration
 
 | Parameter | Value |
 |-----------|-------|
@@ -490,7 +490,7 @@ In the original Python app, these sounds were triggered by external hardware eve
 | DNS | `192.168.0.1` |
 | TCP Listen Port | `8080` |
 
-### 12.2 Protocol (Rearranged)
+### 12.2 Protocol
 
 **iPad → ESP32 Commands:**
 
